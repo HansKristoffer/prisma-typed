@@ -4,7 +4,7 @@ import type {
 	Types
 } from '@prisma/client/runtime/client'
 import type { z } from 'zod'
-import type { ResultTypes, TypedClient } from './client-types'
+import type { ResultTypes, TypedClient } from './client-types.js'
 
 type TypeMapDef = Types.Extensions.TypeMapDef
 

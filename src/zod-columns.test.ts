@@ -3,7 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { z } from 'zod'
 import { PrismaClient } from '../test/fixture/generated/client'
 import { columns, productData } from '../test/fixture/schemas'
-import { withZodColumns } from './zod-columns'
+import { withZodColumns } from './zod-columns.js'
 
 // Never connects: every case here is refused before a query runs.
 const client = () =>

@@ -1,10 +1,10 @@
 import type { z } from 'zod'
-import type { ClientTypes } from './client-types'
+import type { ClientTypes } from './client-types.js'
 import type {
 	CheckedColumns,
 	ZodColumnSchemas,
 	ZodColumnsClient
-} from './zod-column-types'
+} from './zod-column-types.js'
 
 /** Thrown when a JSON column fails its schema, on write or on read. */
 export class ZodColumnError extends Error {

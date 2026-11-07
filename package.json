@@ -1,13 +1,10 @@
 {
   "name": "prisma-typed",
   "version": "0.0.0",
-  "private": true,
-  "description": "Zod-typed, validated JSON columns and branded ids for Prisma 7 clients",
+  "description": "Type-safe Prisma JSON columns: Zod validates every write and parses every read, nested writes included. Plus branded ids for every id and foreign key. A Prisma 7 client extension.",
   "type": "module",
-  "main": "./dist/index.js",
-  "module": "./dist/index.js",
-  "types": "./dist/index.d.ts",
   "license": "MIT",
+  "author": "Kristoffer Hansen",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/HansKristoffer/prisma-typed.git"
@@ -16,28 +13,62 @@
   "bugs": {
     "url": "https://github.com/HansKristoffer/prisma-typed/issues"
   },
-  "author": "Kristoffer Hansen",
-  "keywords": ["prisma", "zod", "json", "jsonb", "typed-id", "branded-id", "typescript"],
-  "files": ["src/**/*.ts", "dist", "!src/**/*.test.ts"],
+  "keywords": [
+    "prisma",
+    "prisma-client",
+    "prisma-extension",
+    "zod",
+    "json",
+    "jsonb",
+    "typed-json",
+    "json-validation",
+    "branded-types",
+    "branded-ids",
+    "typed-ids",
+    "type-safe",
+    "typescript",
+    "postgres",
+    "postgresql",
+    "orm"
+  ],
+  "engines": {
+    "node": "^20.19 || ^22.12 || >=24.0"
+  },
   "sideEffects": false,
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "bun": "./src/index.ts",
       "import": "./dist/index.js",
       "default": "./dist/index.js"
-    }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "LICENSE",
+    "README.md",
+    "src/**/*.ts",
+    "!src/**/*.test.ts"
+  ],
+  "publishConfig": {
+    "access": "public"
   },
   "scripts": {
-    "build": "rm -rf dist && bun run build:js && bun run build:types",
-    "build:js": "bun build ./src/index.ts --outdir ./dist --target node --packages external",
-    "build:types": "tsgo -p tsconfig.build.json",
+    "build": "rm -rf dist && tsgo -p tsconfig.build.json",
     "generate": "prisma generate --schema test/fixture/schema.prisma",
     "fixture:sql": "prisma migrate diff --config test/fixture/prisma.config.ts --from-empty --to-schema test/fixture/schema.prisma --script -o test/fixture/schema.sql",
     "test": "bun run generate && bun test",
     "typecheck": "bun run generate && tsgo --noEmit",
     "lint": "bun run typecheck && biome check",
     "lint:write": "bun run typecheck && biome check --write",
+    "attw": "attw --pack . --profile esm-only",
+    "publint": "publint",
+    "test:consumers": "bun scripts/check-consumers.ts",
+    "verify:package": "node scripts/verify-package.mjs",
     "prepare": "husky"
   },
   "peerDependencies": {
@@ -45,6 +76,7 @@
     "zod": "^4.0.0"
   },
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.18.5",
     "@biomejs/biome": "^2.5",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
@@ -54,6 +86,7 @@
     "husky": "^9.1.7",
     "pg": "8.23.1",
     "prisma": "7.10.1",
+    "publint": "^0.3.25",
     "zod": "^4"
   }
 }

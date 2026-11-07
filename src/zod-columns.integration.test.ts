@@ -9,8 +9,8 @@ import {
 import { createFixtureDatabase } from '../test/fixture/database'
 import { Prisma } from '../test/fixture/generated/client'
 import { columns } from '../test/fixture/schemas'
-import { withTypedIds } from './typed-ids'
-import { withZodColumns, ZodColumnError } from './zod-columns'
+import { withTypedIds } from './typed-ids.js'
+import { withZodColumns, ZodColumnError } from './zod-columns.js'
 
 const url = process.env.DATABASE_URL
 

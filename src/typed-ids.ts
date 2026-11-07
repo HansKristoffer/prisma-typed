@@ -1,6 +1,6 @@
 import type { Types } from '@prisma/client/runtime/client'
 import type { z } from 'zod'
-import type { ClientTypes, ResultTypes, TypedClient } from './client-types'
+import type { ClientTypes, ResultTypes, TypedClient } from './client-types.js'
 
 /**
  * A branded string id: `Id<'User'>` is not assignable to `Id<'Team'>`. The

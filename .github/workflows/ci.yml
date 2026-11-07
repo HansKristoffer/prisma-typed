@@ -1,5 +1,6 @@
-# Lint every PR and every push to main, and test against Postgres on the
-# oldest and the latest Prisma 7 the package supports.
+# Lint every PR and every push to main, test against Postgres on the oldest
+# and the latest Prisma 7 the package supports, and check the packed package
+# the way a consumer installs it.
 name: CI
 on:
   pull_request:
@@ -32,13 +33,19 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run build
+      - run: bun run attw
+      - run: bun run publint
+      - run: bun run verify:package
       # The fixture DDL is generated from the fixture schema; they must agree.
       - run: bun run fixture:sql && git diff --exit-code test/fixture/schema.sql
 
@@ -64,7 +71,7 @@ jobs:
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/prisma_typed
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
@@ -75,3 +82,25 @@ jobs:
       - run: bunx prisma --version | head -2
       - run: bun run typecheck
       - run: bun run test
+
+  consumers:
+    name: consumers (${{ matrix.peers }} peers)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        peers: [minimum, latest]
+    env:
+      PEER_PROFILE: ${{ matrix.peers }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run build
+      - run: bun run test:consumers

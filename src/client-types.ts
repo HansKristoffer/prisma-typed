@@ -1,5 +1,5 @@
 import type { Types } from '@prisma/client/runtime/client'
-import type { NarrowInputs } from './input-types'
+import type { NarrowInputs } from './input-types.js'
 
 /**
  * The type parameters a Prisma 7 client carries, read off its `$extends`

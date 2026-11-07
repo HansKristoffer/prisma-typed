@@ -8,9 +8,9 @@ import {
 	type orderLineDetails,
 	type productData
 } from '../test/fixture/schemas'
-import type { Id } from './typed-ids'
-import { withTypedIds } from './typed-ids'
-import { withZodColumns } from './zod-columns'
+import type { Id } from './typed-ids.js'
+import { withTypedIds } from './typed-ids.js'
+import { withZodColumns } from './zod-columns.js'
 
 // Type-only: nothing below is called, so no client is constructed.
 declare const base: PrismaClient
