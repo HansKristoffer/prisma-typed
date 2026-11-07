@@ -5,18 +5,29 @@ import type {
 	Types
 } from '@prisma/client/runtime/client'
 import type { z } from 'zod'
-import { type ClientTypes, extend } from './client-types'
-import {
-	type ZodColumnSchemas,
-	type ZodColumnsExtArgs,
-	zodColumns
-} from './zod-columns'
+import type { ClientTypes, ResultTypes } from './client-types'
 
-// Experimental: narrows the write inputs of an extended client's JSON columns
-// to `z.input` of their schemas, nested writes included. Prisma's extension
-// API cannot change input types, so this rebuilds the client type from its
-// TypeMap. Apply it last: a later `$extends` recomputes the TypeMap and drops
-// the narrowing.
+type TypeMapDef = Types.Extensions.TypeMapDef
+
+/**
+ * Zod schemas for JSON columns, keyed by model name as written in the Prisma
+ * schema, then by field.
+ */
+export type ZodColumnSchemas = {
+	readonly [model: string]: { readonly [field: string]: z.ZodType }
+}
+
+/** The schema configured for `Model.Field`, or `never`. */
+type ColumnSchema<Columns, Model, Field> = Model extends keyof Columns
+	? Field extends keyof Columns[Model]
+		? Extract<Columns[Model][Field], z.ZodType>
+		: never
+	: never
+
+// Write inputs. Prisma's extension API cannot change input types, so the
+// client type is rebuilt from a TypeMap whose write arguments have each
+// column narrowed to its schema's input, nested writes included. A later
+// `$extends` recomputes the TypeMap, which drops the narrowing.
 
 type WriteOperation =
 	| 'create'
@@ -38,7 +49,7 @@ type NestedKey =
 	| 'updateMany'
 
 type RelationTarget<
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Model,
 	Key
 > = Model extends keyof TypeMap['model']
@@ -66,7 +77,7 @@ type ColumnInput<Original, Schema extends z.ZodType> =
 type Narrow<
 	T,
 	Model,
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Columns
 > = T extends readonly (infer Item)[]
 	? Narrow<Item, Model, TypeMap, Columns>[]
@@ -80,26 +91,21 @@ type NarrowKey<
 	T,
 	K extends keyof T,
 	Model,
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Columns
-> =
-	// A JSON column's input always includes Prisma's `JsonNull`; the `data`
-	// of `{ where, data }` and other envelopes never does.
-	Model extends keyof Columns
-		? K extends keyof Columns[Model]
-			? [Extract<T[K], ObjectEnumValue>] extends [never]
-				? NarrowNested<T, K, Model, TypeMap, Columns>
-				: Columns[Model][K] extends z.ZodType
-					? ColumnInput<T[K], Columns[Model][K]>
-					: T[K]
-			: NarrowNested<T, K, Model, TypeMap, Columns>
-		: NarrowNested<T, K, Model, TypeMap, Columns>
+> = [ColumnSchema<Columns, Model, K>] extends [never]
+	? NarrowNested<T, K, Model, TypeMap, Columns>
+	: // A column's input includes Prisma's `JsonNull`; the `data` of
+		// `{ where, data }` does not.
+		[Extract<T[K], ObjectEnumValue>] extends [never]
+		? NarrowNested<T, K, Model, TypeMap, Columns>
+		: ColumnInput<T[K], ColumnSchema<Columns, Model, K>>
 
 type NarrowNested<
 	T,
 	K extends keyof T,
 	Model,
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Columns
 > = [RelationTarget<TypeMap, Model, K>] extends [never]
 	? K extends NestedKey
@@ -107,22 +113,17 @@ type NarrowNested<
 		: T[K]
 	: NarrowRelation<T[K], RelationTarget<TypeMap, Model, K>, TypeMap, Columns>
 
-type NarrowRelation<
-	Envelope,
-	Target,
-	TypeMap extends Types.Extensions.TypeMapDef,
-	Columns
-> = Target extends keyof Columns
-	? 'data' extends keyof Columns[Target]
-		? StrictUpdate<Narrow<Envelope, Target, TypeMap, Columns>>
-		: Narrow<Envelope, Target, TypeMap, Columns>
-	: Narrow<Envelope, Target, TypeMap, Columns>
-
 /**
- * On a model with a column called `data`, a nested `update` sets the column
- * only through `{ where, data }`: without `where`, Prisma could read `data`
- * either way, so the runtime refuses it too.
+ * On a model with a column called `data`, a nested `update` sets it only
+ * through `{ where, data }`: without `where`, Prisma could read `data` either
+ * way, so the runtime refuses it too.
  */
+type NarrowRelation<Envelope, Target, TypeMap extends TypeMapDef, Columns> = [
+	ColumnSchema<Columns, Target, 'data'>
+] extends [never]
+	? Narrow<Envelope, Target, TypeMap, Columns>
+	: StrictUpdate<Narrow<Envelope, Target, TypeMap, Columns>>
+
 type StrictUpdate<Envelope> = Envelope extends object
 	? {
 			[K in keyof Envelope]: K extends 'update'
@@ -131,19 +132,19 @@ type StrictUpdate<Envelope> = Envelope extends object
 		}
 	: Envelope
 
+type WhereOf<Item> = 'where' extends keyof Item
+	? NonNullable<Item['where' & keyof Item]>
+	: never
+
 type StrictUpdateItem<Item> = Item extends readonly unknown[]
 	? Item
 	: Item extends object
-		? 'where' extends keyof Item
-			? [NonNullable<Item['where' & keyof Item]>] extends [never]
-				? Omit<Item, 'data'>
-				: Omit<Item, 'where'> & {
-						where: NonNullable<Item['where' & keyof Item]>
-					}
-			: Omit<Item, 'data'>
+		? [WhereOf<Item>] extends [never]
+			? Omit<Item, 'data'>
+			: Omit<Item, 'where'> & { where: WhereOf<Item> }
 		: Item
 
-type NarrowTypeMap<TypeMap extends Types.Extensions.TypeMapDef, Columns> = Omit<
+type NarrowTypeMap<TypeMap extends TypeMapDef, Columns> = Omit<
 	TypeMap,
 	'model'
 > & {
@@ -168,8 +169,10 @@ type NarrowTypeMap<TypeMap extends Types.Extensions.TypeMapDef, Columns> = Omit<
 	}
 }
 
+// Configuration checks.
+
 type JsonFields<
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Model extends keyof TypeMap['model']
 > = {
 	[Field in keyof TypeMap['model'][Model]['payload']['scalars']]: JsonValue extends TypeMap['model'][Model]['payload']['scalars'][Field]
@@ -179,7 +182,7 @@ type JsonFields<
 
 /** A column is `Json?` exactly when Prisma accepts `DbNull` for it. */
 type IsNullable<
-	TypeMap extends Types.Extensions.TypeMapDef,
+	TypeMap extends TypeMapDef,
 	Model extends keyof TypeMap['model'],
 	Field
 > = TypeMap['model'][Model]['operations']['create']['args']['data'] extends infer Data
@@ -193,7 +196,7 @@ type IsNullable<
 		: true
 	: never
 
-/** Why a schema cannot type a column, or `never` when it can. */
+/** Why a schema cannot type its column, or `never` when it can. */
 type ColumnProblem<Schema extends z.ZodType, Nullable extends boolean> =
 	z.output<Schema> extends JsonValue
 		? z.output<Schema> extends z.input<Schema>
@@ -205,81 +208,60 @@ type ColumnProblem<Schema extends z.ZodType, Nullable extends boolean> =
 			: 'stores the parsed value, which must parse again: no transforms or codecs'
 		: 'stores the parsed value, so the schema must output JSON'
 
+/** The schema when it can type its column; otherwise why not, naming the column. */
+type Checked<
+	Schema,
+	Column extends string,
+	Nullable extends boolean
+> = Schema extends z.ZodType
+	? [ColumnProblem<Schema, Nullable>] extends [never]
+		? Schema
+		: `${Column} ${ColumnProblem<Schema, Nullable>}`
+	: never
+
 /**
- * Rejects a model the client does not have, a field that is not `Json`, and
- * a schema that cannot type its column, naming the column and the reason.
+ * Rejects a model the client does not have, a field that is not `Json`, and a
+ * schema that cannot type its column.
  */
-type CheckedColumns<Columns, TypeMap extends Types.Extensions.TypeMapDef> = {
+export type CheckedColumns<Columns, TypeMap extends TypeMapDef> = {
 	[Model in keyof Columns]: Model extends keyof TypeMap['model']
 		? {
 				[Field in keyof Columns[Model]]: Field extends JsonFields<
 					TypeMap,
 					Model
 				>
-					? Columns[Model][Field] extends z.ZodType
-						? [
-								ColumnProblem<
-									Columns[Model][Field],
-									IsNullable<TypeMap, Model, Field>
-								>
-							] extends [never]
-							? Columns[Model][Field]
-							: `${Model & string}.${Field & string} ${ColumnProblem<
-									Columns[Model][Field],
-									IsNullable<TypeMap, Model, Field>
-								>}`
-						: never
+					? Checked<
+							Columns[Model][Field],
+							`${Model & string}.${Field & string}`,
+							IsNullable<TypeMap, Model, Field>
+						>
 					: never
 			}
 		: never
 }
 
-/** What `client.$extends(zodColumns(columns))` returns, with narrowed writes. */
+/** Each column typed as its schema's output, for Prisma's result typing. */
+type ColumnResults<Columns extends ZodColumnSchemas> = ResultTypes<{
+	[Model in keyof Columns & string as Uncapitalize<Model>]: {
+		[Field in keyof Columns[Model]]: z.output<Columns[Model][Field]>
+	}
+}>
+
+/** The client `withZodColumns` returns. */
 export type ZodColumnsClient<
 	Client,
 	Columns extends ZodColumnSchemas,
 	Parts extends ClientTypes<Client> = ClientTypes<Client>,
-	Merged extends Record<string, unknown> = Types.Extensions.MergeExtArgs<
+	ExtArgs extends Record<string, unknown> = Types.Extensions.MergeExtArgs<
 		Parts['typeMap'],
 		Parts['extArgs'],
-		ZodColumnsExtArgs<Columns>
+		ColumnResults<Columns>
 	>
 > = Types.Extensions.DynamicClientExtensionThis<
 	NarrowTypeMap<
-		Types.Utils.Call<Parts['typeMapCb'], { extArgs: Merged }>,
+		Types.Utils.Call<Parts['typeMapCb'], { extArgs: ExtArgs }>,
 		Columns
 	>,
 	Parts['typeMapCb'],
-	Merged
+	ExtArgs
 >
-
-/**
- * Types and validates JSON columns with Zod, keyed by model name as written in
- * the Prisma schema. Writes are parsed before they run, nested writes
- * included, and the parsed value is what is stored. Reads are typed as the
- * schema's output and parsed as the query returns, so a bad row fails the
- * query with its id; rows a write returns parse on first access, so a
- * committed write never throws. Write inputs are narrowed to the schema's
- * input type.
- *
- * Call it last: a later `$extends` keeps the checks but drops the narrowed
- * input types.
- *
- * ```ts
- * export const prisma = withZodColumns(new PrismaClient({ adapter }), {
- *   Product: { data: productData }
- * })
- * ```
- */
-export function withZodColumns<
-	Client extends { $extends: unknown },
-	const Columns extends ZodColumnSchemas
->(
-	client: Client,
-	columns: Columns & CheckedColumns<Columns, ClientTypes<Client>['typeMap']>
-): ZodColumnsClient<Client, Columns> {
-	return extend(client, zodColumns(columns)) as ZodColumnsClient<
-		Client,
-		Columns
-	>
-}

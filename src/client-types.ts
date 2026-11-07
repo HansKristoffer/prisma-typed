@@ -15,26 +15,35 @@ export type ClientTypes<Client> = Client extends {
 	? { typeMapCb: TypeMapCb; extArgs: ExtArgs; typeMap: TypeMap }
 	: never
 
+/**
+ * Extension args that only type results: per model, per field, the type
+ * Prisma reads off `compute`. Nothing is computed at runtime.
+ */
+export type ResultTypes<Result> = {
+	result: {
+		[Model in keyof Result]: {
+			[Field in keyof Result[Model]]: () => {
+				compute: () => Result[Model][Field]
+			}
+		}
+	}
+	model: Record<never, never>
+	query: Record<never, never>
+	client: Record<never, never>
+}
+
 /** What `client.$extends(extension)` returns for an extension with these args. */
 export type ExtendedClient<
 	Client,
 	Args extends Record<string, unknown>,
 	Parts extends ClientTypes<Client> = ClientTypes<Client>,
-	Merged extends Record<string, unknown> = Types.Extensions.MergeExtArgs<
+	ExtArgs extends Record<string, unknown> = Types.Extensions.MergeExtArgs<
 		Parts['typeMap'],
 		Parts['extArgs'],
 		Args
 	>
 > = Types.Extensions.DynamicClientExtensionThis<
-	Types.Utils.Call<Parts['typeMapCb'], { extArgs: Merged }>,
+	Types.Utils.Call<Parts['typeMapCb'], { extArgs: ExtArgs }>,
 	Parts['typeMapCb'],
-	Merged
+	ExtArgs
 >
-
-/** Calls `client.$extends`, whose overloads a generic client cannot name. */
-export function extend(client: { $extends: unknown }, extension: unknown) {
-	return (client.$extends as (extension: unknown) => unknown).call(
-		client,
-		extension
-	)
-}

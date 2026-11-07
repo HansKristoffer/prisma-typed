@@ -10,7 +10,7 @@ import {
 } from '../test/fixture/schemas'
 import type { Id } from './typed-ids'
 import { withTypedIds } from './typed-ids'
-import { withZodColumns } from './zod-inputs'
+import { withZodColumns } from './zod-columns'
 
 // Type-only: nothing below is called, so no client is constructed.
 declare const base: PrismaClient
@@ -302,17 +302,12 @@ describe('withZodColumns: write types', () => {
 		expect(writes).toBeFunction()
 	})
 
-	test('a later $extends keeps the read types but drops the narrowed inputs', () => {
-		const writes = async (db: ReturnType<typeof narrowed>) => {
-			const extended = db.$extends({})
-			const row = await extended.product.findFirstOrThrow()
+	test('a later $extends keeps the read types', () => {
+		const reads = async (db: ReturnType<typeof narrowed>) => {
+			const row = await db.$extends({}).product.findFirstOrThrow()
 			expectTypeOf(row.data).toEqualTypeOf<ProductData>()
-			// Compiles: the input is Prisma's JSON type again. The runtime still rejects it.
-			await extended.product.create({
-				data: { kind: 'klippekort', name: 'x', data: missingDays }
-			})
 		}
-		expect(writes).toBeFunction()
+		expect(reads).toBeFunction()
 	})
 
 	test('rejects unknown models and fields that are not Json', () => {

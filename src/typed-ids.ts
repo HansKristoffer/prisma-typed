@@ -1,6 +1,6 @@
 import type { Types } from '@prisma/client/runtime/client'
 import type { z } from 'zod'
-import { type ClientTypes, type ExtendedClient, extend } from './client-types'
+import type { ClientTypes, ExtendedClient, ResultTypes } from './client-types'
 
 /**
  * A branded string id: `Id<'User'>` is not assignable to `Id<'Team'>`. The
@@ -8,9 +8,6 @@ import { type ClientTypes, type ExtendedClient, extend } from './client-types'
  * types are interchangeable.
  */
 export type Id<Model extends string> = string & z.$brand<Model>
-
-// Brands `id` and relation scalar columns as `Id<'Model'>`. Types only; the
-// column values are already right at runtime.
 
 type TypeMapDef = Types.Extensions.TypeMapDef
 type Scalars<
@@ -23,7 +20,7 @@ type Objects<
 > = TypeMap['model'][Model]['payload']['objects']
 
 /** Models with a string `id` column. */
-export type ModelsWithStringId<TypeMap extends TypeMapDef> = {
+type ModelsWithStringId<TypeMap extends TypeMapDef> = {
 	[Model in keyof TypeMap['model']]: 'id' extends keyof Scalars<TypeMap, Model>
 		? Exclude<Scalars<TypeMap, Model>['id'], null> extends string
 			? Model
@@ -89,28 +86,15 @@ type Branded<Target, Value> = Target extends string
 		: Id<Target>
 	: never
 
-type TypedIdsExtArgs<TypeMap extends TypeMapDef, Manual> = {
-	result: {
-		[Model in keyof TypeMap['model'] & string as Uncapitalize<Model>]: {
-			[Field in keyof IdTargets<TypeMap, Model, Manual> &
-				keyof Scalars<TypeMap, Model> &
-				string]: () => {
-				needs: { [F in Field]: true }
-				compute(
-					row: {
-						[F in Field]: Scalars<TypeMap, Model>[F]
-					}
-				): Branded<
-					IdTargets<TypeMap, Model, Manual>[Field],
-					Scalars<TypeMap, Model>[Field]
-				>
-			}
-		}
+type TypedIdsExtArgs<TypeMap extends TypeMapDef, Manual> = ResultTypes<{
+	[Model in keyof TypeMap['model'] & string as Uncapitalize<Model>]: {
+		[Field in keyof IdTargets<TypeMap, Model, Manual> &
+			keyof Scalars<TypeMap, Model>]: Branded<
+			IdTargets<TypeMap, Model, Manual>[Field],
+			Scalars<TypeMap, Model>[Field]
+		>
 	}
-	model: Record<never, never>
-	query: Record<never, never>
-	client: Record<never, never>
-}
+}>
 
 /** The client with branded ids. */
 export type TypedIdsClient<
@@ -140,10 +124,9 @@ export function withTypedIds<
 		never,
 		never
 	>
->(client: Client, manual?: Manual): TypedIdsClient<Client, Manual> {
+>(client: Client, manual?: Manual) {
+	// Types only: the column values are already right at runtime, and
+	// `manual` only feeds the types.
 	void manual
-	return extend(client, {
-		name: 'prisma-typed/withTypedIds',
-		result: {}
-	}) as TypedIdsClient<Client, Manual>
+	return client as unknown as TypedIdsClient<Client, Manual>
 }

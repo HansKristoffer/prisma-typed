@@ -3,8 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { z } from 'zod'
 import { PrismaClient } from '../test/fixture/generated/client'
 import { columns, productData } from '../test/fixture/schemas'
-import { zodColumns } from './zod-columns'
-import { withZodColumns } from './zod-inputs'
+import { withZodColumns } from './zod-columns'
 
 // Never connects: every case here is refused before a query runs.
 const client = () =>
@@ -14,16 +13,21 @@ const client = () =>
 
 type Hook = (params: object) => Promise<unknown>
 
-// The hook as Prisma calls it, for operations the client cannot produce.
+// The hook as Prisma calls it, for operations a real client cannot produce:
+// a stand-in client hands back the extension it is given.
 const hookFor = () => {
-	const extension = zodColumns({ Product: { data: productData } })({
+	const standIn = {
 		_runtimeDataModel: {
 			models: {
 				Product: { fields: [{ name: 'data', kind: 'scalar', type: 'Json' }] }
 			}
 		},
-		$extends: (args: unknown) => args
-	}) as unknown as { query: { $allModels: { $allOperations: Hook } } }
+		$extends: (extension: unknown) => extension
+	}
+	const columns = { Product: { data: productData } }
+	const extension = withZodColumns(standIn as never, columns as never) as {
+		query: { $allModels: { $allOperations: Hook } }
+	}
 	return extension.query.$allModels.$allOperations
 }
 

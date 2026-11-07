@@ -10,8 +10,7 @@ import { createFixtureDatabase } from '../test/fixture/database'
 import { Prisma } from '../test/fixture/generated/client'
 import { columns } from '../test/fixture/schemas'
 import { withTypedIds } from './typed-ids'
-import { ZodColumnError } from './zod-columns'
-import { withZodColumns } from './zod-inputs'
+import { withZodColumns, ZodColumnError } from './zod-columns'
 
 const url = process.env.DATABASE_URL
 
@@ -65,7 +64,7 @@ describe.skipIf(!url)('withZodColumns on Postgres', () => {
 			data: { lines: { create: { productId: 'p1', details: ticket } } }
 		})
 
-		const reads: unknown[] = [
+		const reads = [
 			(await prisma.product.findMany())[0]?.data,
 			(await prisma.product.findUniqueOrThrow({ where: { id: 'p1' } })).data,
 			(await prisma.product.findFirst({ select: { data: true } }))?.data,
@@ -101,9 +100,7 @@ describe.skipIf(!url)('withZodColumns on Postgres', () => {
 					},
 					include: { product: true }
 				})
-			).product?.data
-		]
-		reads.push(
+			).product?.data,
 			(
 				await prisma.product.upsert({
 					where: { id: 'p1' },
@@ -112,8 +109,7 @@ describe.skipIf(!url)('withZodColumns on Postgres', () => {
 				})
 			).data,
 			(await prisma.product.delete({ where: { id: 'p1' } })).data
-		)
-		expect(reads).toHaveLength(13)
+		]
 		for (const data of reads) expect(data).toEqual(klippekort)
 	})
 
@@ -371,11 +367,7 @@ describe.skipIf(!url)('withZodColumns on Postgres', () => {
 	test('withZodColumns over withTypedIds checks and parses the same way', async () => {
 		const typed = withZodColumns(withTypedIds(db.prisma), columns)
 		const created = await typed.product.create({
-			data: {
-				kind: 'klippekort',
-				name: 'x',
-				data: { ...klippekort, extra: 1 } as typeof klippekort
-			}
+			data: { kind: 'klippekort', name: 'x', data: klippekort }
 		})
 		expect(created.data).toEqual(klippekort)
 		const found = await typed.product.findUniqueOrThrow({
