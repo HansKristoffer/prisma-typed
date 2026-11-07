@@ -226,6 +226,28 @@ describe('withZodColumns: write types', () => {
 				}
 			})
 
+			// On a model with a `data` column, a nested update sets it only
+			// through `{ where, data }`.
+			const line = { id: 'l1' }
+			await db.orderLine.update({
+				where: line,
+				data: { product: { update: { where: {}, data: { data: klippekort } } } }
+			})
+			await db.orderLine.update({
+				where: line,
+				data: { product: { update: { name: 'renamed' } } }
+			})
+			await db.orderLine.update({
+				where: line,
+				// @ts-expect-error `data` without `where` is ambiguous
+				data: { product: { update: { data: klippekort } } }
+			})
+			await db.orderLine.update({
+				where: line,
+				// @ts-expect-error `data` without `where` is ambiguous
+				data: { product: { update: { data: { name: 'renamed' } } } }
+			})
+
 			// Two levels down: order → line → product.
 			const product = {
 				kind: 'klippekort',

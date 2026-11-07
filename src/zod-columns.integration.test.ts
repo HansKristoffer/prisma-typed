@@ -297,35 +297,39 @@ describe.skipIf(!url)('zodColumns on Postgres', () => {
 		expect(stored.map((line) => line.details)).toEqual([ticket])
 	})
 
-	test('reads a lone nested `{ data }` the way Prisma does', async () => {
+	test('refuses a nested update that leaves `data` ambiguous', async () => {
 		await insertRaw('p1', klippekort)
 		const order = await prisma.order.create({
 			data: { lines: { create: { productId: 'p1', details: ticket } } },
 			include: { lines: true }
 		})
 		const where = { id: order.lines[0]!.id }
+		const updateProduct = (update: object) =>
+			prisma.orderLine.update({ where, data: { product: { update } } })
 
-		// Only fields of Product inside: Prisma reads it as `{ where?, data }`.
-		await prisma.orderLine.update({
-			where,
-			data: { product: { update: { data: { name: 'renamed' } } } }
-		})
-		expect(
-			(await prisma.product.findUniqueOrThrow({ where: { id: 'p1' } })).name
-		).toBe('renamed')
-
-		// Anything else is Product.data itself, so it is checked.
+		// Prisma reads the first as `{ where?, data }` and the others as the
+		// column, by validating both. The extension refuses all three.
+		for (const update of [
+			{ data: { name: 'renamed' } },
+			{ data: { name: 123 } },
+			{ name: 'renamed', data: klippekort }
+		]) {
+			await rejects(updateProduct(update)).toThrow(
+				'Ambiguous nested update of Product'
+			)
+		}
+		await updateProduct({ where: {}, data: { name: 'renamed' } })
+		await updateProduct({ name: 'direct' })
 		await rejects(
-			prisma.orderLine.update({
-				where,
-				data: {
-					product: {
-						update: { data: { kind: 'klippekort', klip: 0, validityDays: 1 } }
-					}
-				}
+			updateProduct({
+				where: {},
+				data: { data: { kind: 'klippekort', klip: 0, validityDays: 1 } }
 			})
 		).toThrow('Writing Product.data failed')
-		expect(await storedData('p1')).toEqual(klippekort)
+		const stored = await db.admin.query(
+			`SELECT name, data FROM "Product" WHERE id = 'p1'`
+		)
+		expect(stored.rows[0]).toEqual({ name: 'direct', data: klippekort })
 	})
 
 	test('passes Prisma.DbNull to a nullable column and reads it as null', async () => {

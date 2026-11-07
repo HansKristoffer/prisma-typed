@@ -105,7 +105,43 @@ type NarrowNested<
 	? K extends NestedKey
 		? Narrow<T[K], Model, TypeMap, Columns>
 		: T[K]
-	: Narrow<T[K], RelationTarget<TypeMap, Model, K>, TypeMap, Columns>
+	: NarrowRelation<T[K], RelationTarget<TypeMap, Model, K>, TypeMap, Columns>
+
+type NarrowRelation<
+	Envelope,
+	Target,
+	TypeMap extends Types.Extensions.TypeMapDef,
+	Columns
+> = Target extends keyof Columns
+	? 'data' extends keyof Columns[Target]
+		? StrictUpdate<Narrow<Envelope, Target, TypeMap, Columns>>
+		: Narrow<Envelope, Target, TypeMap, Columns>
+	: Narrow<Envelope, Target, TypeMap, Columns>
+
+/**
+ * On a model with a column called `data`, a nested `update` sets the column
+ * only through `{ where, data }`: without `where`, Prisma could read `data`
+ * either way, so the runtime refuses it too.
+ */
+type StrictUpdate<Envelope> = Envelope extends object
+	? {
+			[K in keyof Envelope]: K extends 'update'
+				? StrictUpdateItem<Envelope[K]>
+				: Envelope[K]
+		}
+	: Envelope
+
+type StrictUpdateItem<Item> = Item extends readonly unknown[]
+	? Item
+	: Item extends object
+		? 'where' extends keyof Item
+			? [NonNullable<Item['where' & keyof Item]>] extends [never]
+				? Omit<Item, 'data'>
+				: Omit<Item, 'where'> & {
+						where: NonNullable<Item['where' & keyof Item]>
+					}
+			: Omit<Item, 'data'>
+		: Item
 
 type NarrowTypeMap<TypeMap extends Types.Extensions.TypeMapDef, Columns> = Omit<
 	TypeMap,

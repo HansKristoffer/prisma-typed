@@ -276,14 +276,12 @@ function parseOnAccess(
  */
 function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 	const relations = new Map<string, Map<string, string>>()
-	const fieldNames = new Map<string, Set<string>>()
 	for (const [model, { fields }] of Object.entries(dataModel.models)) {
 		const byField = new Map<string, string>()
 		for (const field of fields) {
 			if (field.kind === 'object') byField.set(field.name, field.type)
 		}
 		relations.set(model, byField)
-		fieldNames.set(model, new Set(fields.map((field) => field.name)))
 	}
 
 	for (const [model, fields] of Object.entries(columns)) {
@@ -385,9 +383,7 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 					)
 					break
 				case 'update':
-					next = each(value, (item) =>
-						isWhereData(target, item) ? withKey(item, 'data', data) : data(item)
-					)
+					next = each(value, (item) => updateItem(target, item))
 					break
 			}
 			if (next !== value) {
@@ -398,20 +394,23 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 		return out ?? envelope
 	}
 
-	// A nested `update` is `{ where?, data }` or, on a to-one relation, the
-	// update itself. When the target has a JSON column called `data`, Prisma
-	// reads a lone `{ data }` as the wrapper if `data` holds only fields of the
-	// target, and as the column's value otherwise. This mirrors that.
-	function isWhereData(target: string, item: unknown) {
-		if (!isPlainObject(item) || item.data === undefined) return false
-		const keys = Object.keys(item)
-		if (!keys.every((key) => key === 'data' || key === 'where')) return false
-		if ('where' in item || !columns[target]?.data) return true
-		const fields = fieldNames.get(target)
-		return (
-			isPlainObject(item.data) &&
-			Object.keys(item.data).every((key) => fields?.has(key))
-		)
+	// A nested `update` is `{ where, data }` or, on a to-one relation, the
+	// update itself. On a model with a column called `data`, a `data` key
+	// without `where` could be either; Prisma picks one by validating both, so
+	// that form is refused rather than guessed.
+	function updateItem(target: string, item: unknown) {
+		if (!isPlainObject(item) || item.data === undefined) {
+			return write(target, item)
+		}
+		if ('where' in item) return withKey(item, 'data', (v) => write(target, v))
+		if (columns[target]?.data) {
+			throw new Error(
+				`Ambiguous nested update of ${target}: \`data\` can mean the ${target}.data column or the data of \`{ where, data }\`. Write \`update: { where: {}, data: { … } }\`.`
+			)
+		}
+		return Object.keys(item).length === 1
+			? withKey(item, 'data', (v) => write(target, v))
+			: write(target, item)
 	}
 
 	function read(model: string, result: unknown, args: unknown, lazy: boolean) {
