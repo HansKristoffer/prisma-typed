@@ -52,7 +52,7 @@ Leave out `.default()` and `.catch()` if old rows should fail loudly instead of 
 
 ### Things to know
 
-- **Call `withZodColumns` last.** A later `$extends` keeps the checks but drops the narrowed input types.
+- **Call `withZodColumns` last.** A later `$extends` keeps the checks and the read types, but drops the narrowed input types for JSON columns and ids.
 - **Prisma's generated input types are not narrowed.** A value typed `Prisma.ProductCreateInput` is rejected by the narrowed client. Type inputs with `Prisma.Args<typeof prisma.product, 'create'>['data']` instead.
 - **A column called `data` on a to-one relation.** Prisma cannot tell a nested `update: { data }` from its own `{ where, data }` form, so the column is set only through `update: { where: {}, data: { data: … } }`.
 - **A `kind` column next to a union in `data`.** A row is not a union, so check `row.data.kind` to narrow `row.data`. Keep the two equal with a `CHECK` constraint.
@@ -68,11 +68,24 @@ const prisma = withTypedIds(new PrismaClient({ adapter }), {
 })
 ```
 
+Results come back branded. Inputs take the column's own `Id` or a plain string, so values from URLs and fixtures need no cast, and another model's `Id` is a type error:
+
+```ts
+const line = await prisma.orderLine.findFirstOrThrow()
+await prisma.order.findUnique({ where: { id: line.orderId } })    // ✓
+await prisma.product.findUnique({ where: { id: req.params.id } }) // ✓ a plain string
+await prisma.product.findUnique({ where: { id: line.orderId } })  // ✗ an Order id is not a Product id
+```
+
+That holds in `where` and its filters, `cursor`, `connect` and the other nested writes, relation filters, nested `include` and `select`, and foreign keys in `data`.
+
 `Id<'User'>` is `string & z.$brand<'User'>`, the same brand as Zod's `.brand<'User'>()` and `Id` from `hanzio/zod`. It is types only, with no runtime cost.
 
 ## Cost
 
-On 1,000 rows of a three-kind union, parsing adds about 2 ms to a `findMany`, and checking adds about 1% to a `createMany`. Narrowing the input types costs the type checker about 0.2 s on a 47-model schema, once, not per query.
+On 1,000 rows of a three-kind union, parsing adds about 2 ms to a `findMany`, and checking adds about 1% to a `createMany`.
+
+The narrowed input types cost the type checker once per schema, not per query. On a 47-model schema, JSON columns add about 0.2 s and branded id inputs about 0.3 to 0.4 s, on top of the extended client Prisma already builds.
 
 ## Prisma 8
 

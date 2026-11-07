@@ -20,7 +20,7 @@ These are good defaults, not hard rules. My preferences in the conversation over
 - **you** means the agent reading this file. **we** and **the maintainer** mean Kristoffer.
 - **consumer** means an app that installs prisma-typed.
 - **column** means a JSON column configured in `withZodColumns`. **reaching model** means a model whose writes or reads can touch a column, directly or through relations.
-- **walker** means the runtime code in `src/zod-columns.ts` that follows writes and rows through relations. **narrowing** means the types in `src/zod-column-types.ts` that do the same for write inputs.
+- **walker** means the runtime code in `src/zod-columns.ts` that follows writes and rows through relations. **narrowing** means the types in `src/input-types.ts` that do the same for inputs: JSON columns in writes, and branded ids everywhere a model's rows are picked or set.
 
 ## The ways to hurt yourself
 

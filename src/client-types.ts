@@ -1,4 +1,5 @@
 import type { Types } from '@prisma/client/runtime/client'
+import type { NarrowInputs } from './input-types'
 
 /**
  * The type parameters a Prisma 7 client carries, read off its `$extends`
@@ -32,10 +33,14 @@ export type ResultTypes<Result> = {
 	client: Record<never, never>
 }
 
-/** What `client.$extends(extension)` returns for an extension with these args. */
-export type ExtendedClient<
+/**
+ * What `client.$extends(extension)` returns for an extension that adds these
+ * result types, with JSON column and id inputs narrowed.
+ */
+export type TypedClient<
 	Client,
 	Args extends Record<string, unknown>,
+	Columns,
 	Parts extends ClientTypes<Client> = ClientTypes<Client>,
 	ExtArgs extends Record<string, unknown> = Types.Extensions.MergeExtArgs<
 		Parts['typeMap'],
@@ -43,7 +48,11 @@ export type ExtendedClient<
 		Args
 	>
 > = Types.Extensions.DynamicClientExtensionThis<
-	Types.Utils.Call<Parts['typeMapCb'], { extArgs: ExtArgs }>,
+	NarrowInputs<
+		Types.Utils.Call<Parts['typeMapCb'], { extArgs: ExtArgs }>,
+		Columns,
+		ExtArgs
+	>,
 	Parts['typeMapCb'],
 	ExtArgs
 >

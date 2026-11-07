@@ -21,6 +21,9 @@ type NotificationData = z.output<typeof notificationData>
 
 // Uncalled factories, so the type tests never touch `base` at runtime.
 const narrowed = () => withZodColumns(base, columns)
+const typedOnly = () => withTypedIds(base)
+const onlyProducts = () =>
+	withZodColumns(base, { Product: { data: columns.Product.data } })
 const typed = () =>
 	withZodColumns(
 		withTypedIds(base, { Notification: { orderId: 'Order' } }),
@@ -310,6 +313,14 @@ describe('withZodColumns: write types', () => {
 		expect(reads).toBeFunction()
 	})
 
+	test('a JSON column that is not configured keeps Prisma’s input type', () => {
+		const writes = async (db: ReturnType<typeof onlyProducts>) => {
+			const tags = ['a', 'b'] as const
+			await db.notification.create({ data: { type: 't', data: { tags } } })
+		}
+		expect(writes).toBeFunction()
+	})
+
 	test('rejects unknown models and fields that are not Json', () => {
 		const configs = () => {
 			withZodColumns(base, { Product: { data: columns.Product.data } })
@@ -415,5 +426,114 @@ describe('withTypedIds', () => {
 			withTypedIds(base, { Notification: { orderId: 'Ordr' } })
 		}
 		expect(configs).toBeFunction()
+	})
+})
+
+describe('withTypedIds: inputs', () => {
+	test('where, cursor and filters take their model’s id or a plain string', () => {
+		const inputs = async (db: ReturnType<typeof typed>, plain: string) => {
+			const line = await db.orderLine.findFirstOrThrow()
+			const order = line.orderId
+			const product = line.productId!
+
+			await db.product.findUnique({ where: { id: product } })
+			await db.product.findUnique({ where: { id: plain } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.findUnique({ where: { id: order } })
+
+			await db.product.findMany({ where: { id: { in: [product, plain] } } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.findMany({ where: { id: { in: [order] } } })
+
+			await db.product.findMany({ where: { NOT: { id: { not: product } } } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.findMany({ where: { NOT: { id: { not: order } } } })
+
+			await db.product.findMany({ cursor: { id: product } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.findMany({ cursor: { id: order } })
+
+			await db.product.count({ where: { id: product } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.count({ where: { id: order } })
+
+			await db.product.findMany({ where: { locationId: null } })
+		}
+		expect(inputs).toBeFunction()
+	})
+
+	test('foreign keys take the id of the model they point at', () => {
+		const inputs = async (db: ReturnType<typeof typed>) => {
+			const line = await db.orderLine.findFirstOrThrow()
+			const order = line.orderId
+			const product = line.productId!
+
+			await db.orderLine.create({ data: { orderId: order, details: ticket } })
+			// @ts-expect-error a product id is not an order id
+			await db.orderLine.create({ data: { orderId: product, details: ticket } })
+
+			const where = { id: line.id }
+			await db.orderLine.update({ where, data: { orderId: { set: order } } })
+			// @ts-expect-error a product id is not an order id
+			await db.orderLine.update({ where, data: { orderId: { set: product } } })
+
+			const connect = (id: typeof order) => ({ order: { connect: { id } } })
+			await db.orderLine.create({
+				data: { details: ticket, ...connect(order) }
+			})
+			await db.orderLine.create({
+				// @ts-expect-error a product id is not an order id
+				data: { details: ticket, order: { connect: { id: product } } }
+			})
+
+			await db.order.findMany({
+				where: { lines: { some: { productId: product } } }
+			})
+			await db.order.findMany({
+				// @ts-expect-error an order id is not a product id
+				where: { lines: { some: { productId: order } } }
+			})
+
+			await db.order.findMany({
+				include: { lines: { where: { productId: product } } }
+			})
+			await db.order.findMany({
+				// @ts-expect-error an order id is not a product id
+				include: { lines: { where: { productId: order } } }
+			})
+
+			// A manual target is an id input too.
+			await db.notification.findMany({ where: { orderId: order } })
+			// @ts-expect-error a product id is not an order id
+			await db.notification.findMany({ where: { orderId: product } })
+		}
+		expect(inputs).toBeFunction()
+	})
+
+	test('select, orderBy and distinct keep their own types', () => {
+		const inputs = async (db: ReturnType<typeof typed>) => {
+			await db.product.findMany({
+				select: { id: true },
+				orderBy: { id: 'asc' },
+				distinct: ['id']
+			})
+		}
+		expect(inputs).toBeFunction()
+	})
+
+	test('withTypedIds alone brands inputs, in transactions too', () => {
+		const inputs = async (db: ReturnType<typeof typedOnly>) => {
+			const line = await db.orderLine.findFirstOrThrow()
+			await db.order.findUnique({ where: { id: line.orderId } })
+			// @ts-expect-error an order id is not a product id
+			await db.product.findUnique({ where: { id: line.orderId } })
+
+			await db.$transaction(async (tx) => {
+				await tx.order.findUnique({ where: { id: line.orderId } })
+				// @ts-expect-error an order id is not a product id
+				await tx.product.findUnique({ where: { id: line.orderId } })
+			})
+		}
+		expect(inputs).toBeFunction()
 	})
 })

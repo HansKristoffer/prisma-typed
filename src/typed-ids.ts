@@ -1,6 +1,6 @@
 import type { Types } from '@prisma/client/runtime/client'
 import type { z } from 'zod'
-import type { ClientTypes, ExtendedClient, ResultTypes } from './client-types'
+import type { ClientTypes, ResultTypes, TypedClient } from './client-types'
 
 /**
  * A branded string id: `Id<'User'>` is not assignable to `Id<'Team'>`. The
@@ -96,13 +96,11 @@ type TypedIdsExtArgs<TypeMap extends TypeMapDef, Manual> = ResultTypes<{
 	}
 }>
 
-/** The client with branded ids. */
-export type TypedIdsClient<
+/** The client with branded ids, on results and on inputs. */
+export type TypedIdsClient<Client, Manual = Record<never, never>> = TypedClient<
 	Client,
-	Manual = Record<never, never>
-> = ExtendedClient<
-	Client,
-	TypedIdsExtArgs<ClientTypes<Client>['typeMap'], Manual>
+	TypedIdsExtArgs<ClientTypes<Client>['typeMap'], Manual>,
+	Record<never, never>
 >
 
 /**
