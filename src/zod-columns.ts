@@ -143,6 +143,30 @@ const WRITES_RETURNING_ROWS = new Set([
 	'delete'
 ])
 
+/** Every other model operation of Prisma 7. Anything else is refused. */
+const OTHER_OPERATIONS = new Set([
+	'createMany',
+	'updateMany',
+	'deleteMany',
+	'aggregate',
+	'count'
+])
+
+/** The nested writes Prisma 7 has. Anything else is refused. */
+const NESTED_WRITES = new Set([
+	'create',
+	'connectOrCreate',
+	'connect',
+	'createMany',
+	'set',
+	'disconnect',
+	'delete',
+	'update',
+	'updateMany',
+	'upsert',
+	'deleteMany'
+])
+
 /**
  * Types and validates JSON columns with Zod. Writes are parsed before they
  * reach the database, nested writes included, and the parsed value is what is
@@ -188,6 +212,20 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 						__internalParams
 					}: QueryHook) {
 						if (!model || !walker.reaches(model)) return query(args)
+						const lazy = WRITES_RETURNING_ROWS.has(operation)
+						const returnsRows = lazy || READS.has(operation)
+						if (!returnsRows && !OTHER_OPERATIONS.has(operation)) {
+							throw new Error(
+								`withZodColumns cannot check ${model}.${operation}: it does not know this operation`
+							)
+						}
+						// The fluent API returns related rows; only this path says which.
+						const dataPath = __internalParams?.dataPath
+						if (returnsRows && !Array.isArray(dataPath)) {
+							throw new Error(
+								`withZodColumns cannot check ${model}.${operation}: Prisma passed no query path`
+							)
+						}
 						let next = args
 						for (const key of WRITE_KEYS[operation] ?? []) {
 							if (next?.[key] === undefined) continue
@@ -195,9 +233,8 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 							if (checked !== next[key]) next = { ...next, [key]: checked }
 						}
 						const result = await query(next)
-						const lazy = WRITES_RETURNING_ROWS.has(operation)
-						if (reads === 'parse' && (lazy || READS.has(operation))) {
-							const at = walker.follow(model, next, __internalParams?.dataPath)
+						if (reads === 'parse' && returnsRows) {
+							const at = walker.follow(model, next, dataPath)
 							walker.read(at.model, result, at.args, lazy)
 						}
 						return result
@@ -365,7 +402,13 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 		const data = (value: unknown) => write(target, value)
 		let out: Record<string, unknown> | undefined
 		for (const [op, value] of Object.entries(envelope)) {
-			let next = value
+			if (value === undefined) continue
+			if (!NESTED_WRITES.has(op)) {
+				throw new Error(
+					`withZodColumns cannot check the nested write "${op}" on ${target}`
+				)
+			}
+			let next: unknown = value
 			switch (op) {
 				case 'create':
 					next = data(value)
