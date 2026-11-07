@@ -1,0 +1,59 @@
+{
+  "name": "prisma-typed",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Zod-typed, validated JSON columns and branded ids for Prisma 7 clients",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/HansKristoffer/prisma-typed.git"
+  },
+  "homepage": "https://github.com/HansKristoffer/prisma-typed#readme",
+  "bugs": {
+    "url": "https://github.com/HansKristoffer/prisma-typed/issues"
+  },
+  "author": "Kristoffer Hansen",
+  "keywords": ["prisma", "zod", "json", "jsonb", "typed-id", "branded-id", "typescript"],
+  "files": ["src/**/*.ts", "dist", "!src/**/*.test.ts"],
+  "sideEffects": false,
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "bun": "./src/index.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "rm -rf dist && bun run build:js && bun run build:types",
+    "build:js": "bun build ./src/index.ts --outdir ./dist --target node --packages external",
+    "build:types": "tsgo -p tsconfig.build.json",
+    "generate": "prisma generate --schema test/fixture/schema.prisma",
+    "fixture:sql": "prisma migrate diff --config test/fixture/prisma.config.ts --from-empty --to-schema test/fixture/schema.prisma --script -o test/fixture/schema.sql",
+    "test": "bun run generate && bun test",
+    "typecheck": "bun run generate && tsgo --noEmit",
+    "lint": "bun run typecheck && biome check",
+    "lint:write": "bun run typecheck && biome check --write",
+    "prepare": "husky"
+  },
+  "peerDependencies": {
+    "@prisma/client": ">=7.8.0 <8",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5",
+    "@prisma/adapter-pg": "7.10.1",
+    "@prisma/client": "7.10.1",
+    "@types/bun": "^1.4.4",
+    "@types/pg": "^8.23.1",
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "husky": "^9.1.7",
+    "pg": "8.23.1",
+    "prisma": "7.10.1",
+    "zod": "^4"
+  }
+}

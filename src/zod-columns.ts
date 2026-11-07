@@ -1,0 +1,437 @@
+import type { z } from 'zod'
+
+/**
+ * Zod schemas for JSON columns, keyed by model name as written in the Prisma
+ * schema, then by field. A nullable column (`Json?`) needs a schema that
+ * accepts `null`.
+ */
+export type ZodColumnSchemas = {
+	readonly [model: string]: { readonly [field: string]: z.ZodType }
+}
+
+/**
+ * How reads are checked. `parse` parses every row a query returns, so a bad
+ * row fails the query. `trust` only types the column: use it when every write
+ * goes through this extension and the schemas have no transforms or defaults.
+ */
+export type ZodColumnReads = 'parse' | 'trust'
+
+type ColumnResult<Field extends string, Schema extends z.ZodType> = {
+	needs: { [F in Field]: true }
+	compute(row: { [F in Field]: unknown }): z.output<Schema>
+}
+
+/** The `result` component Prisma reads the column types from. */
+export type ZodColumnsResult<Columns extends ZodColumnSchemas> = {
+	[Model in keyof Columns & string as Uncapitalize<Model>]: {
+		[Field in keyof Columns[Model] & string]: ColumnResult<
+			Field,
+			Columns[Model][Field]
+		>
+	}
+}
+
+/**
+ * What `$extends` infers from: Prisma's internal shape for an extension that
+ * only adds result fields.
+ */
+export type ZodColumnsExtArgs<Columns extends ZodColumnSchemas> = {
+	result: {
+		[Model in keyof ZodColumnsResult<Columns>]: {
+			[Field in keyof ZodColumnsResult<Columns>[Model]]: () => ZodColumnsResult<Columns>[Model][Field]
+		}
+	}
+	model: Record<never, never>
+	query: Record<never, never>
+	client: Record<never, never>
+}
+
+/** A Prisma extension, as `prisma.$extends()` takes it. */
+export type ZodColumnsExtension<Columns extends ZodColumnSchemas> = (
+	client: unknown
+) => { $extends: { extArgs: ZodColumnsExtArgs<Columns> } }
+
+/** Thrown when a JSON column fails its schema, on write or on read. */
+export class ZodColumnError extends Error {
+	readonly model: string
+	readonly field: string
+	readonly issues: z.core.$ZodIssue[]
+
+	constructor(
+		model: string,
+		field: string,
+		direction: 'write' | 'read',
+		error: z.ZodError,
+		id?: unknown
+	) {
+		const issues = error.issues
+			.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
+			.join('; ')
+		const row = id === undefined ? '' : ` for id ${JSON.stringify(id)}`
+		super(
+			`${direction === 'write' ? 'Writing' : 'Reading'} ${model}.${field}${row} failed: ${issues}`,
+			{ cause: error }
+		)
+		this.name = 'ZodColumnError'
+		this.model = model
+		this.field = field
+		this.issues = error.issues
+	}
+}
+
+type RuntimeField = { name: string; kind: string; type: string }
+type RuntimeDataModel = {
+	models: Record<string, { fields: readonly RuntimeField[] }>
+}
+type QueryHook = {
+	model?: string
+	operation: string
+	args: Record<string, unknown> | undefined
+	query: (args: unknown) => Promise<unknown>
+	// Prisma's own extensions read this; the fluent API's path is in it.
+	__internalParams?: { dataPath?: unknown[] }
+}
+
+const PRISMA_NULL = Symbol.for('prisma.objectEnumValue')
+
+/** `Prisma.DbNull`, `Prisma.JsonNull` and `Prisma.AnyNull`, from any copy of Prisma. */
+function isPrismaNull(value: unknown) {
+	return (
+		typeof value === 'object' &&
+		value !== null &&
+		(value as Record<symbol, unknown>)[PRISMA_NULL] === true
+	)
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	if (typeof value !== 'object' || value === null) return false
+	const proto = Object.getPrototypeOf(value)
+	return proto === Object.prototype || proto === null
+}
+
+/** The arguments each write operation carries its data in. */
+const WRITE_KEYS: Record<string, readonly string[]> = {
+	create: ['data'],
+	createMany: ['data'],
+	createManyAndReturn: ['data'],
+	update: ['data'],
+	updateMany: ['data'],
+	updateManyAndReturn: ['data'],
+	upsert: ['create', 'update']
+}
+
+/** Operations that return rows of their model. */
+const ROW_OPERATIONS = new Set([
+	'findUnique',
+	'findUniqueOrThrow',
+	'findFirst',
+	'findFirstOrThrow',
+	'findMany',
+	'create',
+	'createManyAndReturn',
+	'update',
+	'updateManyAndReturn',
+	'upsert',
+	'delete',
+	'groupBy'
+])
+
+/**
+ * Types and validates JSON columns with Zod. Writes are parsed before they
+ * reach the database, nested writes included, and the parsed value is what is
+ * stored. Reads are typed as the schema's output and, by default, parsed as
+ * the query returns, so a bad row fails the query with its id.
+ *
+ * ```ts
+ * const prisma = new PrismaClient({ adapter }).$extends(
+ *   zodColumns({ Product: { data: productData } })
+ * )
+ * const product = await prisma.product.findFirstOrThrow()
+ * product.data.kind // 'klippekort' | 'gift_card'
+ * ```
+ */
+export function zodColumns<const Columns extends ZodColumnSchemas>(
+	columns: Columns,
+	{ reads = 'parse' }: { reads?: ZodColumnReads } = {}
+): ZodColumnsExtension<Columns> {
+	return ((client: {
+		_runtimeDataModel?: RuntimeDataModel
+		$extends: (extension: object) => unknown
+	}) => {
+		const dataModel = client._runtimeDataModel
+		if (!dataModel) {
+			throw new Error(
+				'zodColumns needs a Prisma 7 client: the runtime data model is missing'
+			)
+		}
+		const walker = createWalker(columns, dataModel)
+		return client.$extends({
+			name: 'hanzio/zodColumns',
+			// Types only: rows are parsed in the query hook, so Prisma does not
+			// wrap them in proxies for computed fields.
+			result: {},
+			query: {
+				$allModels: {
+					async $allOperations({
+						model,
+						operation,
+						args,
+						query,
+						__internalParams
+					}: QueryHook) {
+						if (!model || !walker.reaches(model)) return query(args)
+						let next = args
+						for (const key of WRITE_KEYS[operation] ?? []) {
+							if (next?.[key] === undefined) continue
+							const checked = walker.write(model, next[key])
+							if (checked !== next[key]) next = { ...next, [key]: checked }
+						}
+						const result = await query(next)
+						if (reads === 'parse' && ROW_OPERATIONS.has(operation)) {
+							const at = walker.follow(model, next, __internalParams?.dataPath)
+							walker.read(at.model, result, at.args)
+						}
+						return result
+					}
+				}
+			}
+		})
+	}) as ZodColumnsExtension<Columns>
+}
+
+function parseColumn(
+	model: string,
+	field: string,
+	schema: z.ZodType,
+	value: unknown,
+	direction: 'write' | 'read',
+	id?: unknown
+) {
+	const parsed = schema.safeParse(value)
+	if (!parsed.success) {
+		throw new ZodColumnError(model, field, direction, parsed.error, id)
+	}
+	return parsed.data
+}
+
+function checkNull(
+	model: string,
+	field: string,
+	schema: z.ZodType,
+	value: unknown
+) {
+	if (schema.safeParse(null).success) return value
+	throw new Error(
+		`Writing ${model}.${field} failed: the schema does not accept null, got ${String(value)}`
+	)
+}
+
+/**
+ * Walks a query's arguments and rows through relation fields, so a column is
+ * checked wherever it appears: in a nested write
+ * (`order.create({ data: { lines: { create } } })`) or in an included
+ * relation. Writes return new objects along changed paths and leave the
+ * caller's arguments alone; reads replace values in the rows Prisma returned.
+ */
+function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
+	const relations = new Map<string, Map<string, string>>()
+	const fieldNames = new Map<string, Set<string>>()
+	for (const [model, { fields }] of Object.entries(dataModel.models)) {
+		const byField = new Map<string, string>()
+		for (const field of fields) {
+			if (field.kind === 'object') byField.set(field.name, field.type)
+		}
+		relations.set(model, byField)
+		fieldNames.set(model, new Set(fields.map((field) => field.name)))
+	}
+
+	for (const [model, fields] of Object.entries(columns)) {
+		const known = dataModel.models[model]
+		if (!known) throw new Error(`zodColumns: unknown model "${model}"`)
+		for (const field of Object.keys(fields)) {
+			const column = known.fields.find((f) => f.name === field)
+			if (column?.type !== 'Json') {
+				throw new Error(`zodColumns: "${model}.${field}" is not a Json column`)
+			}
+		}
+	}
+
+	// Models from which a query can reach a column, directly or nested.
+	const reaching = new Set(Object.keys(columns))
+	for (let grew = true; grew; ) {
+		grew = false
+		for (const [model, byField] of relations) {
+			if (reaching.has(model)) continue
+			if ([...byField.values()].some((target) => reaching.has(target))) {
+				reaching.add(model)
+				grew = true
+			}
+		}
+	}
+	const targetOf = (model: string, field: string) => {
+		const target = relations.get(model)?.get(field)
+		return target && reaching.has(target) ? target : undefined
+	}
+
+	const each = (value: unknown, check: (item: unknown) => unknown) => {
+		if (!Array.isArray(value)) return check(value)
+		let out: unknown[] | undefined
+		value.forEach((item, index) => {
+			const next = check(item)
+			if (next !== item) {
+				out ??= [...value]
+				out[index] = next
+			}
+		})
+		return out ?? value
+	}
+
+	const withKey = (
+		object: unknown,
+		key: string,
+		check: (value: unknown) => unknown
+	) => {
+		if (!isPlainObject(object) || object[key] === undefined) return object
+		const next = check(object[key])
+		return next === object[key] ? object : { ...object, [key]: next }
+	}
+
+	function write(model: string, input: unknown): unknown {
+		return each(input, (item) => {
+			if (!isPlainObject(item)) return item
+			let out: Record<string, unknown> | undefined
+			for (const [key, value] of Object.entries(item)) {
+				if (value === undefined) continue
+				let next: unknown = value
+				const schema = columns[model]?.[key]
+				if (schema) {
+					next = isPrismaNull(value)
+						? checkNull(model, key, schema, value)
+						: parseColumn(model, key, schema, value, 'write')
+				} else {
+					const target = targetOf(model, key)
+					if (target) next = writeNested(target, value)
+				}
+				if (next !== value) {
+					out ??= { ...item }
+					out[key] = next
+				}
+			}
+			return out ?? item
+		})
+	}
+
+	function writeNested(target: string, envelope: unknown): unknown {
+		if (!isPlainObject(envelope)) return envelope
+		const data = (value: unknown) => write(target, value)
+		let out: Record<string, unknown> | undefined
+		for (const [op, value] of Object.entries(envelope)) {
+			let next = value
+			switch (op) {
+				case 'create':
+					next = data(value)
+					break
+				case 'connectOrCreate':
+					next = each(value, (item) => withKey(item, 'create', data))
+					break
+				case 'createMany':
+				case 'updateMany':
+					next = each(value, (item) => withKey(item, 'data', data))
+					break
+				case 'upsert':
+					next = each(value, (item) =>
+						withKey(withKey(item, 'create', data), 'update', data)
+					)
+					break
+				case 'update':
+					next = each(value, (item) =>
+						isWhereData(target, item) ? withKey(item, 'data', data) : data(item)
+					)
+					break
+			}
+			if (next !== value) {
+				out ??= { ...envelope }
+				out[op] = next
+			}
+		}
+		return out ?? envelope
+	}
+
+	// A nested `update` is `{ where?, data }` or, on a to-one relation, the
+	// update itself. When the target has a JSON column called `data`, Prisma
+	// reads a lone `{ data }` as the wrapper if `data` holds only fields of the
+	// target, and as the column's value otherwise. This mirrors that.
+	function isWhereData(target: string, item: unknown) {
+		if (!isPlainObject(item) || item.data === undefined) return false
+		const keys = Object.keys(item)
+		if (!keys.every((key) => key === 'data' || key === 'where')) return false
+		if ('where' in item || !columns[target]?.data) return true
+		const fields = fieldNames.get(target)
+		return (
+			isPlainObject(item.data) &&
+			Object.keys(item.data).every((key) => fields?.has(key))
+		)
+	}
+
+	function read(model: string, result: unknown, args: unknown) {
+		if (Array.isArray(result)) {
+			for (const row of result) read(model, row, args)
+			return
+		}
+		if (!isPlainObject(result)) return
+		const modelColumns = columns[model]
+		if (modelColumns) {
+			for (const [field, schema] of Object.entries(modelColumns)) {
+				if (!(field in result)) continue
+				result[field] = parseColumn(
+					model,
+					field,
+					schema,
+					result[field],
+					'read',
+					result.id
+				)
+			}
+		}
+		if (!isPlainObject(args)) return
+		for (const key of ['include', 'select'] as const) {
+			const nested = args[key]
+			if (!isPlainObject(nested)) continue
+			for (const [field, sub] of Object.entries(nested)) {
+				const target = sub ? targetOf(model, field) : undefined
+				if (target) read(target, result[field], sub)
+			}
+		}
+	}
+
+	// The fluent API (`orderLine.findFirst().product()`) returns the related
+	// rows, not the row the arguments describe. Its path says which relation.
+	function follow(model: string, args: unknown, dataPath: unknown) {
+		let at = { model, args }
+		if (!Array.isArray(dataPath)) return at
+		for (let i = 0; i < dataPath.length; i += 2) {
+			const [key, field] = [dataPath[i], dataPath[i + 1]]
+			if (
+				(key !== 'select' && key !== 'include') ||
+				typeof field !== 'string'
+			) {
+				return at
+			}
+			const target = relations.get(at.model)?.get(field)
+			if (!target) return at
+			const nested = isPlainObject(at.args) ? at.args[key] : undefined
+			at = {
+				model: target,
+				args: isPlainObject(nested) ? nested[field] : undefined
+			}
+		}
+		return at
+	}
+
+	return {
+		write,
+		read,
+		follow,
+		reaches: (model: string) => reaching.has(model)
+	}
+}

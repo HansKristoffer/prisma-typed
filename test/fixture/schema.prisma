@@ -1,0 +1,60 @@
+// Test fixture for hanzio/prisma. Mirrors the shapes it is built for: a
+// `kind` column that mirrors a discriminated union in `data`, a JSON column
+// written through nested writes, and a nullable JSON column.
+
+generator client {
+  provider   = "prisma-client"
+  output     = "./generated"
+  engineType = "client"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum ProductKind {
+  klippekort
+  gift_card
+  shop_item
+}
+
+model Location {
+  id       String    @id @default(cuid())
+  name     String
+  products Product[]
+}
+
+model Product {
+  id         String      @id @default(cuid())
+  locationId String?
+  location   Location?   @relation(fields: [locationId], references: [id])
+  kind       ProductKind
+  data       Json
+  name       String
+  priceOre   Int?
+  orderLines OrderLine[]
+}
+
+model Order {
+  id        String      @id @default(cuid())
+  createdAt DateTime    @default(now())
+  lines     OrderLine[]
+}
+
+model OrderLine {
+  id        String   @id @default(cuid())
+  orderId   String
+  order     Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId String?
+  product   Product? @relation(fields: [productId], references: [id])
+  details   Json
+}
+
+model Notification {
+  id      String    @id @default(cuid())
+  type    String
+  data    Json?
+  readAt  DateTime?
+  /// No relation: a typed-id manual target.
+  orderId String?
+}
