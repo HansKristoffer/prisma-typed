@@ -1,4 +1,5 @@
 import type {
+	DbNullClass,
 	JsonValue,
 	ObjectEnumValue,
 	Types
@@ -176,15 +177,58 @@ type JsonFields<
 		: never
 }[keyof TypeMap['model'][Model]['payload']['scalars']]
 
-/** Rejects a model the client does not have, or a field that is not `Json`. */
-type KnownColumns<Columns, TypeMap extends Types.Extensions.TypeMapDef> = {
+/** A column is `Json?` exactly when Prisma accepts `DbNull` for it. */
+type IsNullable<
+	TypeMap extends Types.Extensions.TypeMapDef,
+	Model extends keyof TypeMap['model'],
+	Field
+> = TypeMap['model'][Model]['operations']['create']['args']['data'] extends infer Data
+	? [
+			Extract<
+				Data extends unknown ? Data[Field & keyof Data] : never,
+				DbNullClass
+			>
+		] extends [never]
+		? false
+		: true
+	: never
+
+/** Why a schema cannot type a column, or `never` when it can. */
+type ColumnProblem<Schema extends z.ZodType, Nullable extends boolean> =
+	z.output<Schema> extends JsonValue
+		? z.output<Schema> extends z.input<Schema>
+			? Nullable extends (null extends z.output<Schema> ? true : false)
+				? never
+				: Nullable extends true
+					? 'is Json?, so its schema must accept null'
+					: 'is required, so its schema must not accept null'
+			: 'stores the parsed value, which must parse again: no transforms or codecs'
+		: 'stores the parsed value, so the schema must output JSON'
+
+/**
+ * Rejects a model the client does not have, a field that is not `Json`, and
+ * a schema that cannot type its column, naming the column and the reason.
+ */
+type CheckedColumns<Columns, TypeMap extends Types.Extensions.TypeMapDef> = {
 	[Model in keyof Columns]: Model extends keyof TypeMap['model']
 		? {
 				[Field in keyof Columns[Model]]: Field extends JsonFields<
 					TypeMap,
 					Model
 				>
-					? Columns[Model][Field]
+					? Columns[Model][Field] extends z.ZodType
+						? [
+								ColumnProblem<
+									Columns[Model][Field],
+									IsNullable<TypeMap, Model, Field>
+								>
+							] extends [never]
+							? Columns[Model][Field]
+							: `${Model & string}.${Field & string} ${ColumnProblem<
+									Columns[Model][Field],
+									IsNullable<TypeMap, Model, Field>
+								>}`
+						: never
 					: never
 			}
 		: never
@@ -232,7 +276,7 @@ export function withZodColumns<
 	const Columns extends ZodColumnSchemas
 >(
 	client: Client,
-	columns: Columns & KnownColumns<Columns, ClientTypes<Client>['typeMap']>
+	columns: Columns & CheckedColumns<Columns, ClientTypes<Client>['typeMap']>
 ): ZodColumnsClient<Client, Columns> {
 	return extend(client, zodColumns(columns)) as ZodColumnsClient<
 		Client,

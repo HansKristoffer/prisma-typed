@@ -55,14 +55,14 @@ export class ZodColumnError extends Error {
 		field: string,
 		direction: 'write' | 'read',
 		error: z.ZodError,
-		id?: unknown
+		{ id, reason }: { id?: unknown; reason?: string } = {}
 	) {
 		const issues = error.issues
 			.map((issue) => `${issue.path.join('.') || '(root)'}: ${issue.message}`)
 			.join('; ')
 		const row = id === undefined ? '' : ` for id ${JSON.stringify(id)}`
 		super(
-			`${direction === 'write' ? 'Writing' : 'Reading'} ${model}.${field}${row} failed: ${issues}`,
+			`${direction === 'write' ? 'Writing' : 'Reading'} ${model}.${field}${row} failed: ${reason ? `${reason}: ` : ''}${issues}`,
 			{ cause: error }
 		)
 		this.name = 'ZodColumnError'
@@ -236,9 +236,38 @@ function parseColumn(
 ) {
 	const parsed = schema.safeParse(value)
 	if (!parsed.success) {
-		throw new ZodColumnError(model, field, direction, parsed.error, id)
+		throw new ZodColumnError(model, field, direction, parsed.error, { id })
 	}
 	return parsed.data
+}
+
+/**
+ * Parses a value for a write and checks that it survives being stored: every
+ * later read parses the stored JSON, so it must parse again. A schema that
+ * transforms, or outputs a `Date`, fails here instead of on every read.
+ */
+function storable(
+	model: string,
+	field: string,
+	schema: z.ZodType,
+	value: unknown
+) {
+	const parsed = parseColumn(model, field, schema, value, 'write')
+	let stored: unknown
+	try {
+		stored = JSON.parse(JSON.stringify(parsed))
+	} catch (error) {
+		throw new Error(
+			`Writing ${model}.${field} failed: its parsed value is not JSON (${error instanceof Error ? error.message : String(error)})`
+		)
+	}
+	const again = schema.safeParse(stored)
+	if (!again.success) {
+		throw new ZodColumnError(model, field, 'write', again.error, {
+			reason: 'stored as JSON, its parsed value does not parse again'
+		})
+	}
+	return parsed
 }
 
 function checkNull(
@@ -367,7 +396,7 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 				if (schema) {
 					next = isPrismaNull(value)
 						? checkNull(model, key, schema, value)
-						: parseColumn(model, key, schema, value, 'write')
+						: storable(model, key, schema, value)
 				} else {
 					const target = targetOf(model, key)
 					if (target) next = writeNested(target, value)

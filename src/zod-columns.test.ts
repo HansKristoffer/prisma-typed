@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { PrismaPg } from '@prisma/adapter-pg'
+import { z } from 'zod'
 import { PrismaClient } from '../test/fixture/generated/client'
 import { columns, productData } from '../test/fixture/schemas'
 import { zodColumns } from './zod-columns'
@@ -66,5 +67,32 @@ describe('withZodColumns refuses what it cannot check', () => {
 				__internalParams: { dataPath: [] }
 			})
 		).resolves.toEqual([])
+	})
+})
+
+describe('withZodColumns checks that a stored value reads back', () => {
+	// JavaScript callers get no compile-time check, so the write checks it.
+	test('refuses a value whose schema transforms it', async () => {
+		const prisma = withZodColumns(client(), {
+			OrderLine: { details: z.object({ seats: z.string().transform(Number) }) }
+		} as never)
+		const write = prisma.orderLine.create({
+			data: { orderId: 'o1', details: { seats: '2' } }
+		} as never)
+		await expect(Promise.resolve(write)).rejects.toThrow(
+			'Writing OrderLine.details failed: stored as JSON, its parsed value does not parse again'
+		)
+	})
+
+	test('refuses a value that does not survive JSON', async () => {
+		const prisma = withZodColumns(client(), {
+			OrderLine: { details: z.object({ at: z.date() }) }
+		} as never)
+		const write = prisma.orderLine.create({
+			data: { orderId: 'o1', details: { at: new Date() } }
+		} as never)
+		await expect(Promise.resolve(write)).rejects.toThrow(
+			'its parsed value does not parse again: at: Invalid input: expected date'
+		)
 	})
 })

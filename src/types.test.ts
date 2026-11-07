@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, test } from 'bun:test'
 import type { JsonValue } from '@prisma/client/runtime/client'
-import type { z } from 'zod'
+import { z } from 'zod'
 import { Prisma, type PrismaClient } from '../test/fixture/generated/client'
 import {
 	columns,
@@ -327,6 +327,49 @@ describe('withZodColumns: write types', () => {
 			withZodColumns(base, {
 				// @ts-expect-error OrderLine.orderId is a String column
 				OrderLine: { orderId: columns.OrderLine.details }
+			})
+		}
+		expect(configs).toBeFunction()
+	})
+
+	test('rejects schemas whose parsed value cannot be stored and read back', () => {
+		const configs = () => {
+			// JSON in, JSON out; a brand only narrows the output.
+			withZodColumns(base, {
+				OrderLine: {
+					details: z.object({
+						at: z.iso.datetime(),
+						slotId: z.string().brand<'Slot'>()
+					})
+				}
+			})
+			withZodColumns(base, {
+				OrderLine: {
+					// @ts-expect-error stores the parsed value, which must parse again
+					details: z.object({ seats: z.string().transform(Number) })
+				}
+			})
+			withZodColumns(base, {
+				// @ts-expect-error a Date is not JSON
+				OrderLine: { details: z.object({ at: z.date() }) }
+			})
+		}
+		expect(configs).toBeFunction()
+	})
+
+	test('matches each schema’s nullability to its column', () => {
+		const configs = () => {
+			withZodColumns(base, {
+				Notification: { data: columns.Notification.data }
+			})
+			withZodColumns(base, {
+				// @ts-expect-error Notification.data is Json?, so its schema must accept null
+				Notification: { data: columns.Notification.data.unwrap() }
+			})
+			withZodColumns(base, { Product: { data: columns.Product.data } })
+			withZodColumns(base, {
+				// @ts-expect-error Product.data is required, so its schema must not accept null
+				Product: { data: columns.Product.data.nullable() }
 			})
 		}
 		expect(configs).toBeFunction()
