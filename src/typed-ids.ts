@@ -143,7 +143,7 @@ export function withTypedIds<
 >(client: Client, manual?: Manual): TypedIdsClient<Client, Manual> {
 	void manual
 	return extend(client, {
-		name: 'hanzio/typedIds',
+		name: 'prisma-typed/withTypedIds',
 		result: {}
 	}) as TypedIdsClient<Client, Manual>
 }

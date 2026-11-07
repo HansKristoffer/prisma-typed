@@ -179,7 +179,7 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 		}
 		const walker = createWalker(columns, dataModel)
 		return client.$extends({
-			name: 'hanzio/zodColumns',
+			name: 'prisma-typed/withZodColumns',
 			// Types only: rows are parsed in the query hook, so Prisma does not
 			// wrap them in proxies for computed fields.
 			result: {},
