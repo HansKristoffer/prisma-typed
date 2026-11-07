@@ -1,6 +1,6 @@
 # prisma-typed
 
-prisma-typed types and validates Prisma 7 JSON columns with Zod, and brands id columns, through two functions: `withZodColumns(client, columns)` and `withTypedIds(client, manual?)`. It is unreleased (`"private": true`). Its first consumers are the Brain template and the La Sauna platform built on it.
+prisma-typed types and validates Prisma 7 JSON columns with Zod, and brands id columns, through two functions: `withZodColumns(client, columns)` and `withTypedIds(client, manual?)`. It is published to npm as `prisma-typed`, `0.x`. Its first consumers are the Brain template and the La Sauna platform built on it.
 
 ## What we never compromise on
 
@@ -26,7 +26,7 @@ These are good defaults, not hard rules. My preferences in the conversation over
 
 1. **Prisma internals.** The walker relies on three: `client._runtimeDataModel` (relations), `__internalParams.dataPath` (the fluent API) and `Symbol.for('prisma.objectEnumValue')` (`DbNull`, `JsonNull`). Keep every access in `src/zod-columns.ts`, and keep each one covered by an integration test.
 2. **Prisma's types change between minors.** The narrowing reads Prisma's TypeMap and its exported extension types. The generated `XOR` changed between 7.8 and 7.10 and broke it once. CI runs the tests on 7.8.0 and the latest 7.x; a change that passes on one only is not done.
-3. **Releasing by accident.** Do not remove `"private": true` or add a release workflow unless we ask.
+3. **Editing release state by hand.** Release Please owns `version`, `CHANGELOG.md` and `.release-please-manifest.json`; the PR title decides the release. Never add `NPM_TOKEN`, `NODE_AUTH_TOKEN` or a `registry-url` to `release.yml`: it breaks trusted publishing. See [releasing](docs/releasing.md).
 4. **Prisma 8.** It is a rewrite without `$extends` result components. This package is Prisma 7 only; do not add machinery for Prisma 8 here.
 
 ## Hit every surface
@@ -34,6 +34,7 @@ These are good defaults, not hard rules. My preferences in the conversation over
 - **Walker and narrowing.** They encode the same nested-write grammar. A change to one is a change to the other, with a test on each side.
 - **Reads.** Read operations parse rows as the query returns. Rows returned by writes parse on first access. Raw queries are never parsed.
 - **Tests.** A type rule gets a `@ts-expect-error` inside an uncalled function, next to a positive twin that compiles. A runtime rule gets an integration test on Postgres.
+- **Package.** A change to exports, peers, `files` or the build also needs `bun run build`, `attw`, `publint`, `verify:package` and `test:consumers`. A change to the public API also updates `test/consumers/types.ts`, which compiles against the packed package.
 - **Docs.** `README.md` is the consumer reference. Rewrite the affected section; do not append a second account.
 
 ## Commands
@@ -46,6 +47,7 @@ These are good defaults, not hard rules. My preferences in the conversation over
   ```
 - After changing `test/fixture/schema.prisma`, run `bun run fixture:sql`.
 - To check the oldest supported Prisma: `bun add -d prisma@7.8.0 @prisma/client@7.8.0 @prisma/adapter-pg@7.8.0`, run the tests, then restore `package.json` and `bun.lock`.
+- Packaging: `bun run build`, then `bun run attw`, `bun run publint`, `bun run verify:package` (packs, checks the files, imports the installed tarball) and `PEER_PROFILE=minimum bun run test:consumers` (type-checks a consumer of the packed package under NodeNext and Bundler; `latest` is the other profile).
 
 ## Commits and pull requests
 

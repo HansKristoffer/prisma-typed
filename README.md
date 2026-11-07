@@ -1,6 +1,12 @@
 # prisma-typed
 
-Zod-typed, validated JSON columns and branded ids for Prisma 7.
+Type-safe JSON columns and branded ids for Prisma 7. Give a JSON column a Zod schema, and every write is checked before it runs, nested writes included, while every read comes back parsed and typed. Every `id` and foreign key gets its own `Id<'Model'>` type, so passing an order's id where a product's is expected stops compiling.
+
+```sh
+bun add prisma-typed zod
+```
+
+ESM only, Node 20.19+ or Bun, TypeScript 5.7+, Prisma 7.8+ with the `prisma-client` generator, Zod 4.
 
 ```ts
 import { withTypedIds, withZodColumns } from 'prisma-typed'
@@ -26,8 +32,6 @@ await prisma.product.create({
 })
 // Type error: validityDays is missing. Untyped callers get a ZodColumnError before the write runs.
 ```
-
-Requires Prisma 7.8 or later with the `prisma-client` generator, and Zod 4. Not published yet.
 
 ## `withZodColumns(client, columns)`
 
