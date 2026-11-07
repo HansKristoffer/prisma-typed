@@ -120,27 +120,35 @@ const WRITE_KEYS: Record<string, readonly string[]> = {
 	upsert: ['create', 'update']
 }
 
-/** Operations that return rows of their model. */
-const ROW_OPERATIONS = new Set([
+/** Reads: their rows are parsed as the query returns, so a bad row fails it. */
+const READS = new Set([
 	'findUnique',
 	'findUniqueOrThrow',
 	'findFirst',
 	'findFirstOrThrow',
 	'findMany',
+	'groupBy'
+])
+
+/**
+ * Writes that return rows. Those rows parse on first access instead: the
+ * write has committed by then, and throwing would report it as failed.
+ */
+const WRITES_RETURNING_ROWS = new Set([
 	'create',
 	'createManyAndReturn',
 	'update',
 	'updateManyAndReturn',
 	'upsert',
-	'delete',
-	'groupBy'
+	'delete'
 ])
 
 /**
  * Types and validates JSON columns with Zod. Writes are parsed before they
  * reach the database, nested writes included, and the parsed value is what is
  * stored. Reads are typed as the schema's output and, by default, parsed as
- * the query returns, so a bad row fails the query with its id.
+ * the query returns, so a bad row fails the query with its id. Rows a write
+ * returns parse on first access, so a committed write never throws.
  *
  * ```ts
  * const prisma = new PrismaClient({ adapter }).$extends(
@@ -187,9 +195,10 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 							if (checked !== next[key]) next = { ...next, [key]: checked }
 						}
 						const result = await query(next)
-						if (reads === 'parse' && ROW_OPERATIONS.has(operation)) {
+						const lazy = WRITES_RETURNING_ROWS.has(operation)
+						if (reads === 'parse' && (lazy || READS.has(operation))) {
 							const at = walker.follow(model, next, __internalParams?.dataPath)
-							walker.read(at.model, result, at.args)
+							walker.read(at.model, result, at.args, lazy)
 						}
 						return result
 					}
@@ -224,6 +233,38 @@ function checkNull(
 	throw new Error(
 		`Writing ${model}.${field} failed: the schema does not accept null, got ${String(value)}`
 	)
+}
+
+/**
+ * Replaces a column with a getter that parses it once, on first access, and
+ * then becomes a plain value. Spreading, `JSON.stringify` and
+ * `structuredClone` read it like any other property.
+ */
+function parseOnAccess(
+	row: Record<string, unknown>,
+	model: string,
+	field: string,
+	schema: z.ZodType
+) {
+	const raw = row[field]
+	const settle = (value: unknown) => {
+		Object.defineProperty(row, field, {
+			value,
+			writable: true,
+			enumerable: true,
+			configurable: true
+		})
+	}
+	Object.defineProperty(row, field, {
+		enumerable: true,
+		configurable: true,
+		get() {
+			const value = parseColumn(model, field, schema, raw, 'read', row.id)
+			settle(value)
+			return value
+		},
+		set: settle
+	})
 }
 
 /**
@@ -373,9 +414,9 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 		)
 	}
 
-	function read(model: string, result: unknown, args: unknown) {
+	function read(model: string, result: unknown, args: unknown, lazy: boolean) {
 		if (Array.isArray(result)) {
-			for (const row of result) read(model, row, args)
+			for (const row of result) read(model, row, args, lazy)
 			return
 		}
 		if (!isPlainObject(result)) return
@@ -383,14 +424,18 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 		if (modelColumns) {
 			for (const [field, schema] of Object.entries(modelColumns)) {
 				if (!(field in result)) continue
-				result[field] = parseColumn(
-					model,
-					field,
-					schema,
-					result[field],
-					'read',
-					result.id
-				)
+				if (lazy) {
+					parseOnAccess(result, model, field, schema)
+				} else {
+					result[field] = parseColumn(
+						model,
+						field,
+						schema,
+						result[field],
+						'read',
+						result.id
+					)
+				}
 			}
 		}
 		if (!isPlainObject(args)) return
@@ -399,7 +444,7 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 			if (!isPlainObject(nested)) continue
 			for (const [field, sub] of Object.entries(nested)) {
 				const target = sub ? targetOf(model, field) : undefined
-				if (target) read(target, result[field], sub)
+				if (target) read(target, result[field], sub, lazy)
 			}
 		}
 	}

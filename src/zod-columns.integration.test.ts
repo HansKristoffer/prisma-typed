@@ -130,6 +130,37 @@ describe.skipIf(!url)('zodColumns on Postgres', () => {
 		])
 	})
 
+	test('never throws after a write has committed', async () => {
+		await insertRaw('legacy', {
+			kind: 'klippekort',
+			klip: -1,
+			validityDays: 30
+		})
+		const renamed = await prisma.product.update({
+			where: { id: 'legacy' },
+			data: { name: 'renamed' }
+		})
+		expect(renamed.name).toBe('renamed')
+		const stored = await db.admin.query(
+			`SELECT name FROM "Product" WHERE id = 'legacy'`
+		)
+		expect(stored.rows[0]?.name).toBe('renamed')
+		// The bad value still fails loudly, where it is used.
+		expect(() => renamed.data).toThrow(
+			'Reading Product.data for id "legacy" failed: klip: Too small'
+		)
+	})
+
+	test('rows a write returns behave like plain objects', async () => {
+		const created = await prisma.product.create({
+			data: { kind: 'klippekort', name: 'x', data: klippekort }
+		})
+		expect(structuredClone(created)).toEqual({ ...created })
+		expect(JSON.parse(JSON.stringify(created)).data).toEqual(klippekort)
+		created.data = { kind: 'gift_card', minOre: 1, maxOre: 2 }
+		expect(created.data).toEqual({ kind: 'gift_card', minOre: 1, maxOre: 2 })
+	})
+
 	test('leaves raw queries unparsed', async () => {
 		await insertRaw('p1', { ...klippekort, legacy: true })
 		const rows = await prisma.$queryRaw<{ data: unknown }[]>`
