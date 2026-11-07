@@ -10,15 +10,14 @@ import { createFixtureDatabase } from '../test/fixture/database'
 import { Prisma } from '../test/fixture/generated/client'
 import { columns } from '../test/fixture/schemas'
 import { withTypedIds } from './typed-ids'
-import { ZodColumnError, zodColumns } from './zod-columns'
+import { ZodColumnError } from './zod-columns'
 import { withZodColumns } from './zod-inputs'
 
 const url = process.env.DATABASE_URL
 
-describe.skipIf(!url)('zodColumns on Postgres', () => {
+describe.skipIf(!url)('withZodColumns on Postgres', () => {
 	let db: Awaited<ReturnType<typeof createFixtureDatabase>>
-	const extend = (reads?: 'parse' | 'trust') =>
-		db.prisma.$extends(zodColumns(columns, { reads }))
+	const extend = () => withZodColumns(db.prisma, columns)
 	let prisma: ReturnType<typeof extend>
 
 	const klippekort = {
@@ -181,7 +180,8 @@ describe.skipIf(!url)('zodColumns on Postgres', () => {
 
 	test('rejects a bad value on every write before it reaches the database', async () => {
 		await insertRaw('p1', klippekort)
-		const bad = { kind: 'klippekort', klip: 0, validityDays: 30 }
+		// Fits the types; only the schema knows klip must be positive.
+		const bad = { kind: 'klippekort', klip: 0, validityDays: 30 } as const
 		const row = { kind: 'klippekort', name: 'x', data: bad } as const
 		const writes = [
 			() => prisma.product.create({ data: row }),
@@ -341,11 +341,13 @@ describe.skipIf(!url)('zodColumns on Postgres', () => {
 			data: { type: 'titled', data: { title: 'Hej' } }
 		})
 		expect(titled.data).toEqual({ title: 'Hej' })
+		// The types refuse this; JavaScript callers get the same answer.
+		const jsonNull = Prisma.JsonNull as never
 		await rejects(
 			prisma.product.create({
-				data: { kind: 'klippekort', name: 'x', data: Prisma.JsonNull }
+				data: { kind: 'klippekort', name: 'x', data: jsonNull }
 			})
-		).toThrow('Writing Product.data failed: the schema does not accept null')
+		).toThrow(ZodColumnError)
 	})
 
 	test('checks writes inside an interactive transaction', async () => {
@@ -384,25 +386,6 @@ describe.skipIf(!url)('zodColumns on Postgres', () => {
 			typed.product.update({
 				where: { id: created.id },
 				data: { data: { kind: 'klippekort', klip: 0, validityDays: 1 } }
-			})
-		).toThrow(ZodColumnError)
-	})
-
-	test('trust mode types reads without parsing them, and still checks writes', async () => {
-		const trusting = extend('trust')
-		await insertRaw('p1', { ...klippekort, legacy: true })
-		const row = await trusting.product.findUniqueOrThrow({
-			where: { id: 'p1' }
-		})
-		expect(row.data).toEqual({ ...klippekort, legacy: true } as never)
-		expect(structuredClone(row)).toEqual(row)
-		await rejects(
-			trusting.product.create({
-				data: {
-					kind: 'klippekort',
-					name: 'x',
-					data: { kind: 'klippekort', klip: 0, validityDays: 1 }
-				}
 			})
 		).toThrow(ZodColumnError)
 	})

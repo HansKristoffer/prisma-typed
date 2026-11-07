@@ -10,7 +10,6 @@ import {
 } from '../test/fixture/schemas'
 import type { Id } from './typed-ids'
 import { withTypedIds } from './typed-ids'
-import { zodColumns } from './zod-columns'
 import { withZodColumns } from './zod-inputs'
 
 // Type-only: nothing below is called, so no client is constructed.
@@ -21,8 +20,6 @@ type OrderLineDetails = z.output<typeof orderLineDetails>
 type NotificationData = z.output<typeof notificationData>
 
 // Uncalled factories, so the type tests never touch `base` at runtime.
-const parsing = () => base.$extends(zodColumns(columns))
-const trusting = () => base.$extends(zodColumns(columns, { reads: 'trust' }))
 const narrowed = () => withZodColumns(base, columns)
 const typed = () =>
 	withZodColumns(
@@ -35,9 +32,9 @@ const missingDays = { kind: 'klippekort', klip: 10 } as const
 const ticket = { kind: 'ticket', version: 1, slotId: 's1', seats: 2 } as const
 const wrongVersion = { ...ticket, version: 2 } as const
 
-describe('zodColumns: read types', () => {
+describe('withZodColumns: read types', () => {
 	test('reads are typed as the schema output wherever Prisma returns rows', () => {
-		const reads = async (prisma: ReturnType<typeof parsing>) => {
+		const reads = async (prisma: ReturnType<typeof narrowed>) => {
 			const row = await prisma.product.findFirstOrThrow()
 			expectTypeOf(row.data).toEqualTypeOf<ProductData>()
 			expectTypeOf(row.name).toEqualTypeOf<string>()
@@ -70,16 +67,8 @@ describe('zodColumns: read types', () => {
 		expect(reads).toBeFunction()
 	})
 
-	test('trust mode types reads the same way', () => {
-		const reads = async (prisma: ReturnType<typeof trusting>) => {
-			const row = await prisma.product.findFirstOrThrow()
-			expectTypeOf(row.data).toEqualTypeOf<ProductData>()
-		}
-		expect(reads).toBeFunction()
-	})
-
 	test('groupBy rows are typed as the schema output, raw rows are not', () => {
-		const reads = async (prisma: ReturnType<typeof parsing>) => {
+		const reads = async (prisma: ReturnType<typeof narrowed>) => {
 			const groups = await prisma.product.groupBy({
 				by: ['data'],
 				orderBy: { data: 'asc' }
@@ -92,7 +81,7 @@ describe('zodColumns: read types', () => {
 	})
 
 	test('the data column narrows on its own kind, not on the kind column', () => {
-		const narrowing = async (prisma: ReturnType<typeof parsing>) => {
+		const narrowing = async (prisma: ReturnType<typeof narrowed>) => {
 			const row = await prisma.product.findFirstOrThrow()
 			if (row.data.kind === 'klippekort') {
 				expectTypeOf(row.data.klip).toEqualTypeOf<number>()
@@ -114,7 +103,7 @@ describe('zodColumns: read types', () => {
 					? Omit<Row, 'kind' | 'data'> & { kind: Kind; data: Data }
 					: never
 				: never
-		const narrowing = async (prisma: ReturnType<typeof parsing>) => {
+		const narrowing = async (prisma: ReturnType<typeof narrowed>) => {
 			const row = await prisma.product.findFirstOrThrow()
 			const product = row as KindUnion<typeof row>
 			if (product.kind === 'klippekort') {

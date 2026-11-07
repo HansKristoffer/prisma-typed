@@ -9,13 +9,6 @@ export type ZodColumnSchemas = {
 	readonly [model: string]: { readonly [field: string]: z.ZodType }
 }
 
-/**
- * How reads are checked. `parse` parses every row a query returns, so a bad
- * row fails the query. `trust` only types the column: use it when every write
- * goes through this extension and the schemas have no transforms or defaults.
- */
-export type ZodColumnReads = 'parse' | 'trust'
-
 type ColumnResult<Field extends string, Schema extends z.ZodType> = {
 	needs: { [F in Field]: true }
 	compute(row: { [F in Field]: unknown }): z.output<Schema>
@@ -168,23 +161,11 @@ const NESTED_WRITES = new Set([
 ])
 
 /**
- * Types and validates JSON columns with Zod. Writes are parsed before they
- * reach the database, nested writes included, and the parsed value is what is
- * stored. Reads are typed as the schema's output and, by default, parsed as
- * the query returns, so a bad row fails the query with its id. Rows a write
- * returns parse on first access, so a committed write never throws.
- *
- * ```ts
- * const prisma = new PrismaClient({ adapter }).$extends(
- *   zodColumns({ Product: { data: productData } })
- * )
- * const product = await prisma.product.findFirstOrThrow()
- * product.data.kind // 'klippekort' | 'gift_card'
- * ```
+ * The extension behind `withZodColumns`: checks writes before they run and
+ * parses the rows queries return. See `withZodColumns` for the rules.
  */
 export function zodColumns<const Columns extends ZodColumnSchemas>(
-	columns: Columns,
-	{ reads = 'parse' }: { reads?: ZodColumnReads } = {}
+	columns: Columns
 ): ZodColumnsExtension<Columns> {
 	return ((client: {
 		_runtimeDataModel?: RuntimeDataModel
@@ -193,7 +174,7 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 		const dataModel = client._runtimeDataModel
 		if (!dataModel) {
 			throw new Error(
-				'zodColumns needs a Prisma 7 client: the runtime data model is missing'
+				'withZodColumns needs a Prisma 7 client: the runtime data model is missing'
 			)
 		}
 		const walker = createWalker(columns, dataModel)
@@ -233,7 +214,7 @@ export function zodColumns<const Columns extends ZodColumnSchemas>(
 							if (checked !== next[key]) next = { ...next, [key]: checked }
 						}
 						const result = await query(next)
-						if (reads === 'parse' && returnsRows) {
+						if (returnsRows) {
 							const at = walker.follow(model, next, dataPath)
 							walker.read(at.model, result, at.args, lazy)
 						}
@@ -266,10 +247,11 @@ function checkNull(
 	schema: z.ZodType,
 	value: unknown
 ) {
-	if (schema.safeParse(null).success) return value
-	throw new Error(
-		`Writing ${model}.${field} failed: the schema does not accept null, got ${String(value)}`
-	)
+	const parsed = schema.safeParse(null)
+	if (!parsed.success) {
+		throw new ZodColumnError(model, field, 'write', parsed.error)
+	}
+	return value
 }
 
 /**
@@ -323,11 +305,13 @@ function createWalker(columns: ZodColumnSchemas, dataModel: RuntimeDataModel) {
 
 	for (const [model, fields] of Object.entries(columns)) {
 		const known = dataModel.models[model]
-		if (!known) throw new Error(`zodColumns: unknown model "${model}"`)
+		if (!known) throw new Error(`withZodColumns: unknown model "${model}"`)
 		for (const field of Object.keys(fields)) {
 			const column = known.fields.find((f) => f.name === field)
 			if (column?.type !== 'Json') {
-				throw new Error(`zodColumns: "${model}.${field}" is not a Json column`)
+				throw new Error(
+					`withZodColumns: "${model}.${field}" is not a Json column`
+				)
 			}
 		}
 	}

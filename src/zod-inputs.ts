@@ -6,7 +6,6 @@ import type {
 import type { z } from 'zod'
 import { type ClientTypes, extend } from './client-types'
 import {
-	type ZodColumnReads,
 	type ZodColumnSchemas,
 	type ZodColumnsExtArgs,
 	zodColumns
@@ -211,9 +210,16 @@ export type ZodColumnsClient<
 >
 
 /**
- * `client.$extends(zodColumns(columns))`, with each JSON column's write input
- * narrowed to its schema's input type, nested writes included. Call it last:
- * a later `$extends` keeps the parsing but drops the narrowed inputs.
+ * Types and validates JSON columns with Zod, keyed by model name as written in
+ * the Prisma schema. Writes are parsed before they run, nested writes
+ * included, and the parsed value is what is stored. Reads are typed as the
+ * schema's output and parsed as the query returns, so a bad row fails the
+ * query with its id; rows a write returns parse on first access, so a
+ * committed write never throws. Write inputs are narrowed to the schema's
+ * input type.
+ *
+ * Call it last: a later `$extends` keeps the checks but drops the narrowed
+ * input types.
  *
  * ```ts
  * export const prisma = withZodColumns(new PrismaClient({ adapter }), {
@@ -226,10 +232,9 @@ export function withZodColumns<
 	const Columns extends ZodColumnSchemas
 >(
 	client: Client,
-	columns: Columns & KnownColumns<Columns, ClientTypes<Client>['typeMap']>,
-	options?: { reads?: ZodColumnReads }
+	columns: Columns & KnownColumns<Columns, ClientTypes<Client>['typeMap']>
 ): ZodColumnsClient<Client, Columns> {
-	return extend(client, zodColumns(columns, options)) as ZodColumnsClient<
+	return extend(client, zodColumns(columns)) as ZodColumnsClient<
 		Client,
 		Columns
 	>
