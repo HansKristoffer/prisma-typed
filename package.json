@@ -1,6 +1,6 @@
 {
   "name": "prisma-typed",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Type-safe Prisma JSON columns: Zod validates every write and parses every read, nested writes included. Plus branded ids for every id and foreign key. A Prisma 7 client extension.",
   "type": "module",
   "license": "MIT",
