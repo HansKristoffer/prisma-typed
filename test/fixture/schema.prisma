@@ -1,4 +1,4 @@
-// Test fixture for hanzio/prisma. Mirrors the shapes it is built for: a
+// Test fixture for prisma-typed. Mirrors the shapes it is built for: a
 // `kind` column that mirrors a discriminated union in `data`, a JSON column
 // written through nested writes, and a nullable JSON column.
 

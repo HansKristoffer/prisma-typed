@@ -15,7 +15,7 @@ const ddl = readFileSync(new URL('./schema.sql', import.meta.url), 'utf8')
  * bound to it. `drop` removes the schema.
  */
 export async function createFixtureDatabase(url: string) {
-	const schema = `hanzio_prisma_${crypto.randomUUID().replaceAll('-', '')}`
+	const schema = `prisma_typed_${crypto.randomUUID().replaceAll('-', '')}`
 	const admin = new pg.Client({ connectionString: url })
 	await admin.connect()
 	await admin.query(`CREATE SCHEMA "${schema}"`)
