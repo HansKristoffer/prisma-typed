@@ -1,6 +1,6 @@
 # prisma-typed
 
-prisma-typed types and validates Prisma 7 JSON columns with Zod, and brands id columns, through two functions: `withZodColumns(client, columns)` and `withTypedIds(client, manual?)`. It is published to npm as `prisma-typed`, `0.x`. Its first consumers are the Brain template and the La Sauna platform built on it.
+prisma-typed types and validates Prisma 7 JSON columns with Zod, and brands id columns, through two functions: `withZodColumns(client, columns)` and `withTypedIds(client, manual?)`. It is published to npm as `prisma-typed`, `0.x`.
 
 ## What we never compromise on
 
